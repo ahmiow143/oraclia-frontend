@@ -139,6 +139,9 @@
   .chat-input-row textarea{flex:1;resize:none;background:#fffdf9;border:1px solid var(--border);border-radius:12px;color:var(--text);padding:12px 14px;font-family:'Jost';font-size:14.5px;outline:none;min-height:48px;}
   .chat-input-row textarea:focus{border-color:var(--gold);}
   .chat-input-row button{padding:0 22px;border:none;border-radius:980px;background:var(--gold);color:#fff;font-weight:500;cursor:pointer;font-size:13px;font-family:'Jost';}
+  .chat-input-row button.icon-btn{padding:0;width:46px;flex:0 0 46px;background:var(--panel-2);border:1px solid var(--border);font-size:17px;display:flex;align-items:center;justify-content:center;}
+  .chat-input-row button.icon-btn:hover{border-color:var(--gold);}
+  .chat-input-row button.icon-btn.active{background:var(--rose);border-color:var(--rose);}
   .chip-row{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-bottom:16px;}
   .chip-row button{background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);font-size:12.5px;padding:8px 14px;border-radius:20px;cursor:pointer;font-family:'Jost';}
   .chip-row button:hover{border-color:var(--gold);color:var(--gold);}
@@ -170,8 +173,8 @@
         <input type="text" id="bname" placeholder="e.g. Alex">
       </div>
       <div class="field">
-        <label for="bdate">Birth date</label>
-        <input type="date" id="bdate">
+        <label for="bdate">Birth date (DD/MM/YYYY)</label>
+        <input type="text" id="bdate" placeholder="DD/MM/YYYY" inputmode="numeric" maxlength="10">
       </div>
       <div class="field">
         <label for="btime">Birth time (local, as on your birth certificate)</label>
@@ -196,14 +199,10 @@
             <div class="field">
               <label for="houseSystem">House system</label>
               <select id="houseSystem">
-                <option value="placidus">Placidus (requires backend)</option>
-                <option value="whole">Whole Sign</option>
+                <option value="whole" selected>Whole Sign</option>
+                <option value="placidus">Placidus</option>
                 <option value="equal">Equal House</option>
               </select>
-            </div>
-            <div class="field">
-              <label for="backendUrl">Backend URL (leave blank to use built-in browser math)</label>
-              <input type="text" id="backendUrl" placeholder="e.g. http://localhost:8000">
             </div>
           </div>
         </details>
@@ -220,21 +219,30 @@
 
       <div class="wheel-holder">
         <div id="wheelSvg"></div>
-        <div class="wheel-caption">Click into any symbol for a plain-English label. The wheel is a quick portrait — the story is in what's below.</div>
+        <div class="wheel-caption">A quick portrait of your chart — the story is in the conversation below.</div>
         <label class="wheel-toggle"><input type="checkbox" id="showAspects" checked> Show aspect lines</label>
       </div>
 
       <div class="note" style="margin-bottom:14px;">Your Big Three — the foundation of everything else</div>
       <div class="big3-row" id="bigThree"></div>
+    </div>
 
-      <div class="group-grid" id="groupedPlacements"></div>
-
-      <div class="aspect-list" id="aspectList"></div>
-
-      <div class="legend">
-        <h3>Planet Key</h3>
-        <div class="legend-grid" id="planetLegend"></div>
+    <div class="card">
+      <h2>Transits — Then, Now &amp; Ahead</h2>
+      <p class="note" style="margin-top:-8px;margin-bottom:18px;">Pick a date, or a whole date range — past or future — to see how the sky lines up against your birth chart. This is what the Oracle uses to talk about timing.</p>
+      <div class="form-grid">
+        <div class="field">
+          <label for="transitFrom">From (DD/MM/YYYY)</label>
+          <input type="text" id="transitFrom" placeholder="DD/MM/YYYY" inputmode="numeric" maxlength="10">
+        </div>
+        <div class="field">
+          <label for="transitTo">To (optional — leave blank for a single day)</label>
+          <input type="text" id="transitTo" placeholder="DD/MM/YYYY" inputmode="numeric" maxlength="10">
+        </div>
       </div>
+      <button class="primary" id="transitBtn">Check This Period</button>
+      <div class="error" id="transitError"></div>
+      <div class="note" id="transitConfirm" style="display:none;"></div>
     </div>
 
     <div class="card">
@@ -244,10 +252,13 @@
         <button data-q="What should I know about my moon sign and my emotional needs?">Emotional needs</button>
         <button data-q="What is my rising sign and how does it shape first impressions of me?">Rising sign</button>
         <button data-q="What are the most important aspects in my chart, and what do they mean?">Key aspects</button>
+        <button data-q="What's happening for me right now, astrologically?">What's happening now</button>
       </div>
       <div class="chat-window" id="chatWindow"></div>
       <div class="chat-input-row">
         <textarea id="chatInput" placeholder="Ask about your chart…"></textarea>
+        <button id="micBtn" class="icon-btn" title="Speak your question" type="button">🎙️</button>
+        <button id="chatTransitBtn" class="icon-btn" title="Load timing data (past, present &amp; future) for the Oracle" type="button">🔮</button>
         <button id="sendBtn">Send</button>
       </div>
       <div class="note" id="chatNote"></div>
@@ -258,9 +269,35 @@
 
 <script>
 /* CONFIG: set this to your deployed backend URL once you go live (see deployment guide).
-   Left as localhost for local testing. */
-const DEFAULT_BACKEND_URL = "https://oraclia-backend.onrender.com";
-document.getElementById('backendUrl').value = DEFAULT_BACKEND_URL;
+   Left as localhost for local testing. This is intentionally NOT exposed as a visible
+   field on the live page - only used internally. */
+const DEFAULT_BACKEND_URL = "http://localhost:8000";
+
+/* ---------- DD/MM/YYYY date helpers ---------- */
+function attachDateAutoFormat(id){
+  const el = document.getElementById(id);
+  el.addEventListener('input', ()=>{
+    let v = el.value.replace(/[^\d]/g,'').slice(0,8);
+    let out = v;
+    if(v.length>4) out = v.slice(0,2)+'/'+v.slice(2,4)+'/'+v.slice(4);
+    else if(v.length>2) out = v.slice(0,2)+'/'+v.slice(2);
+    el.value = out;
+  });
+}
+['bdate','transitFrom','transitTo'].forEach(attachDateAutoFormat);
+
+function parseDDMMYYYY(str){
+  const m = (str||'').trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if(!m) return null;
+  const d=+m[1], mo=+m[2], y=+m[3];
+  if(mo<1||mo>12||d<1||d>31||y<1900||y>2100) return null;
+  return {y, m:mo, d};
+}
+function todayDDMMYYYY(){
+  const t = new Date();
+  return String(t.getDate()).padStart(2,'0')+'/'+String(t.getMonth()+1).padStart(2,'0')+'/'+t.getFullYear();
+}
+document.getElementById('transitFrom').value = todayDDMMYYYY();
 
 /* ---------- landing -> app transition ---------- */
 document.getElementById('beginBtn').addEventListener('click', ()=>{
@@ -571,17 +608,46 @@ function renderWheel(planets, asc, mc, cusps, showAspects){
   return svg;
 }
 
-function renderLegend(){
-  const planetNames = {Sun:'Sun — core identity',Moon:'Moon — emotions',Mercury:'Mercury — mind, communication',Venus:'Venus — love, values',Mars:'Mars — drive, action',Jupiter:'Jupiter — growth, luck',Saturn:'Saturn — discipline, limits',Uranus:'Uranus — change, rebellion',Neptune:'Neptune — dreams, intuition',Pluto:'Pluto — transformation'};
-  document.getElementById('planetLegend').innerHTML = PLANET_ORDER.map(name=>
-    `<div class="legend-item"><span class="lg">${PLANET_GLYPH[name]}</span>${planetNames[name]}</div>`
-  ).join('');
-}
-renderLegend();
-
 /* ---------- main calculate flow ---------- */
 let lastChartSummary = '';
+let lastTransitSummary = '';
 let lastWheelData = null;
+
+async function loadTransits(fromParsed, toParsed, rangeLabel){
+  const body = {natal_planets: lastWheelData.planets, year:fromParsed.y, month:fromParsed.m, day:fromParsed.d, hour:12, minute:0};
+  if(toParsed){ body.end_year=toParsed.y; body.end_month=toParsed.m; body.end_day=toParsed.d; }
+  const resp = await fetch(DEFAULT_BACKEND_URL.replace(/\/$/,'') + '/api/transits', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  const data = await resp.json();
+  if(!resp.ok) throw new Error(data.detail ? JSON.stringify(data.detail) : 'transit lookup failed');
+  const lines = data.transit_aspects.map(a=>`Transiting ${a.transiting} ${a.aspect} natal ${a.natal}, closest on ${a.closest_date} (orb ${a.orb}°)`);
+  lastTransitSummary = `TRANSITS for ${rangeLabel}:\n` + (lines.join('\n') || 'No major transit aspects within orb during this period.');
+  return data;
+}
+
+document.getElementById('transitBtn').addEventListener('click', async ()=>{
+  const errEl=document.getElementById('transitError'); errEl.textContent='';
+  const confirmEl=document.getElementById('transitConfirm'); confirmEl.style.display='none';
+  if(!lastWheelData){ errEl.textContent='Calculate your chart above first.'; return; }
+
+  const fromParsed = parseDDMMYYYY(document.getElementById('transitFrom').value);
+  if(!fromParsed){ errEl.textContent='Enter a valid "From" date as DD/MM/YYYY.'; return; }
+  const toRaw = document.getElementById('transitTo').value.trim();
+  const toParsed = toRaw ? parseDDMMYYYY(toRaw) : null;
+  if(toRaw && !toParsed){ errEl.textContent='Enter a valid "To" date as DD/MM/YYYY, or leave it blank.'; return; }
+
+  const rangeLabel = toParsed ? `${document.getElementById('transitFrom').value} to ${document.getElementById('transitTo').value}` : document.getElementById('transitFrom').value;
+
+  try{
+    await loadTransits(fromParsed, toParsed, rangeLabel);
+    confirmEl.style.display='block';
+    confirmEl.textContent = `✓ Loaded for ${rangeLabel}. Head down to "Ask the Oracle" and ask away — no need to read the raw chart data yourself.`;
+  }catch(e){
+    errEl.textContent = 'Could not calculate transits. (' + e.message + ')';
+  }
+});
 
 document.getElementById('showAspects').addEventListener('change', ()=>{
   if(!lastWheelData) return;
@@ -608,14 +674,15 @@ document.getElementById('calcBtn').addEventListener('click', async ()=>{
   const timeUnknown=document.getElementById('timeUnknown').checked;
   const timeVal=document.getElementById('btime').value;
   const houseSystemRaw=document.getElementById('houseSystem').value; // 'placidus' | 'whole' | 'equal'
-  const backendUrl=document.getElementById('backendUrl').value.trim();
+  const backendUrl=DEFAULT_BACKEND_URL;
 
-  if(!dateVal){ errEl.textContent='Please enter a birth date.'; return; }
+  const parsedDate = parseDDMMYYYY(dateVal);
+  if(!parsedDate){ errEl.textContent='Please enter your birth date as DD/MM/YYYY.'; return; }
   if(!timeUnknown && !timeVal){ errEl.textContent='Please enter a birth time, or check "I don\'t know my exact birth time."'; return; }
   if(!selectedPlace){ errEl.textContent='Please search for and select a birth place from the list.'; return; }
-  if(houseSystemRaw==='placidus' && !backendUrl){ errEl.textContent='Placidus requires a Backend URL — set one in Advanced, or switch to Whole Sign / Equal House.'; return; }
+  if(houseSystemRaw==='placidus' && !backendUrl){ errEl.textContent='Placidus requires a backend — switch to Whole Sign / Equal House.'; return; }
 
-  const [y,mo,d] = dateVal.split('-').map(Number);
+  const {y,m:mo,d} = parsedDate;
   let hh=12, mm=0;
   if(!timeUnknown){ [hh,mm] = timeVal.split(':').map(Number); }
   const haveTime = !timeUnknown;
@@ -669,31 +736,9 @@ document.getElementById('calcBtn').addEventListener('click', async ()=>{
   }
   document.getElementById('bigThree').innerHTML = bigThreeHTML;
 
-  function groupRow(name){
-    const lon=chart.planets[name]; const s=signOf(lon);
-    const house = cusps ? houseOf(lon,cusps) : null;
-    return `<div class="group-item"><span class="group-glyph">${PLANET_GLYPH[name]}</span><span class="group-name">${name}</span><span class="group-sign">${s.sign}${house?` · H${house}`:''}</span></div>`;
-  }
-  const groups = [
-    {title:'How You Think & Connect', items:['Mercury','Venus']},
-    {title:'How You Act & Grow', items:['Mars','Jupiter','Saturn']},
-    {title:'Deeper Currents', items:['Uranus','Neptune','Pluto']}
-  ];
-  let groupsHTML = groups.map(g=>`
-    <div class="group-card">
-      <h4>${g.title}</h4>
-      ${g.items.map(groupRow).join('')}
-    </div>`).join('');
-  if(haveTime){
-    groupsHTML += `<div class="group-card"><h4>Direction & Purpose</h4><div class="group-item"><span class="group-glyph">MC</span><span class="group-name">Midheaven</span><span class="group-sign">${signOf(chart.mc).sign}</span></div></div>`;
-  }
-  document.getElementById('groupedPlacements').innerHTML = groupsHTML;
-
-  // aspects list
+  // (Mercury through Pluto, and aspects, are still calculated below for the
+  // Oracle's context — just no longer displayed as raw astrology jargon on the page.)
   const asps = findAspects(chart.planets);
-  document.getElementById('aspectList').innerHTML = asps.map(a=>
-    `<span class="aspect-chip">${PLANET_GLYPH[a.a]} ${a.asp} ${PLANET_GLYPH[a.b]} <span style="color:var(--text-dim)">(${a.orb}°)</span></span>`
-  ).join('') || '<span class="note">No major aspects within orb.</span>';
 
   // wheel
   lastWheelData = {planets: chart.planets, asc: chart.asc, mc: chart.mc, cusps};
@@ -716,6 +761,8 @@ document.getElementById('calcBtn').addEventListener('click', async ()=>{
   summaryLines.push(`House system: ${houseSystemLabel}.`);
   summaryLines.push(`Major aspects: ${asps.map(a=>`${a.a} ${a.asp} ${a.b} (orb ${a.orb}°)`).join('; ') || 'none within orb'}.`);
   lastChartSummary = summaryLines.join('\n');
+  lastTransitSummary = '';
+  document.getElementById('transitConfirm').style.display='none';
 
   document.getElementById('results').style.display='block';
   document.getElementById('results').scrollIntoView({behavior:'smooth'});
@@ -742,21 +789,24 @@ async function askOracle(question){
   pending.classList.add('pending');
   chatHistory.push({role:'user',content:question});
 
-  const systemPrompt = `You are Oraclia, an astrology guide with a direct, practical voice. Skip mystical or flowery language - explain what a placement means plainly and why it might actually matter in someone's life. Only use the exact chart data below - never invent or alter a placement. If asked about something not listed (e.g. houses when birth time is unknown), say plainly it wasn't calculated.
+  const todayStr = new Date().toISOString().slice(0,10);
+  const combinedSummary = `Today's real-world date is ${todayStr}.\n\n` + lastChartSummary + (lastTransitSummary ? ('\n\n' + lastTransitSummary) : '');
+
+  const systemPrompt = `You are Oraclia, an astrology guide with a direct, practical voice. Skip mystical or flowery language - explain what a placement means plainly and why it might actually matter in someone's life. Only use the exact chart data below - never invent or alter a placement. If asked about something not listed (e.g. houses when birth time is unknown), say plainly it wasn't calculated. The data may include current transits (real planetary positions calculated for one specific date, compared to the natal chart) - use those specifically when asked about timing, "right now", or that specific period. Never invent sign-change dates, forecast windows, or "best time to..." narratives from memory - your training data has a cutoff and can't be trusted for this. If asked about a period you don't have calculated transit data for, say so plainly and suggest checking that specific date with the Transits tool above, rather than guessing.
 
 Match your reply length to the question: a quick fact gets a couple of sentences, a meaningful question gets real depth - never pad for the sake of length. When a short follow-up question would genuinely help you give a sharper answer, ask it - but don't do this every turn, only when it adds real value.
 
 CHART DATA:
-${lastChartSummary}`;
+${combinedSummary}`;
 
-  const backendUrl=document.getElementById('backendUrl').value.trim();
+  const backendUrl=DEFAULT_BACKEND_URL;
 
   try{
     let textBlock='';
     if(backendUrl){
       const resp = await fetch(backendUrl.replace(/\/$/,'') + '/api/chat', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({messages: chatHistory, chart_summary: lastChartSummary})
+        body: JSON.stringify({messages: chatHistory, chart_summary: combinedSummary})
       });
       const data = await resp.json();
       if(!resp.ok) throw new Error(data.detail ? JSON.stringify(data.detail) : 'backend chat error');
@@ -806,6 +856,56 @@ document.getElementById('chatInput').addEventListener('keydown',(e)=>{
 document.getElementById('chipRow').addEventListener('click',(e)=>{
   if(e.target.tagName==='BUTTON'){ askOracle(e.target.dataset.q); }
 });
+
+/* ---------- one-click "load timing data" button next to Send ---------- */
+document.getElementById('chatTransitBtn').addEventListener('click', async ()=>{
+  if(!lastWheelData){ addMsg('ai','Calculate your chart above first — then I can load timing data for you.'); return; }
+  const btn=document.getElementById('chatTransitBtn');
+  btn.disabled=true; btn.textContent='…';
+  const today = new Date();
+  const from = new Date(today); from.setMonth(from.getMonth()-6);
+  const to = new Date(today); to.setFullYear(to.getFullYear()+1);
+  const fmt = dt => `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
+  const fromParsed = {y:from.getFullYear(), m:from.getMonth()+1, d:from.getDate()};
+  const toParsed = {y:to.getFullYear(), m:to.getMonth()+1, d:to.getDate()};
+  try{
+    await loadTransits(fromParsed, toParsed, `${fmt(from)} to ${fmt(to)}`);
+    addMsg('ai', `I've loaded the sky's movements from ${fmt(from)} through ${fmt(to)} — roughly the last six months and the year ahead. Ask me anything about your past, present, or what's coming up.`);
+  }catch(e){
+    addMsg('ai', "Couldn't load timing data just now — try again in a moment.");
+  }
+  btn.disabled=false; btn.textContent='🔮';
+});
+
+/* ---------- microphone dictation ---------- */
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const micBtn = document.getElementById('micBtn');
+if(SpeechRec){
+  const recognition = new SpeechRec();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = 'en-US';
+  let listening = false;
+  micBtn.addEventListener('click', ()=>{
+    if(listening) return;
+    listening = true;
+    micBtn.classList.add('active');
+    micBtn.textContent = '●';
+    recognition.start();
+  });
+  recognition.addEventListener('result', (e)=>{
+    const transcript = e.results[0][0].transcript;
+    const input = document.getElementById('chatInput');
+    input.value = (input.value ? input.value + ' ' : '') + transcript;
+  });
+  const stopListening = ()=>{ listening=false; micBtn.classList.remove('active'); micBtn.textContent='🎙️'; };
+  recognition.addEventListener('end', stopListening);
+  recognition.addEventListener('error', stopListening);
+} else {
+  micBtn.addEventListener('click', ()=>{
+    document.getElementById('chatNote').textContent = 'Voice input isn\'t supported in this browser — try Chrome or Edge.';
+  });
+}
 </script>
 </body>
 </html>
